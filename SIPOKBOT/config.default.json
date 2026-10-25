@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "replyToPrivateMessages": true,
+  "replyToGroups": false,
+  "groupAllowlist": [],
+  "contacts": {
+    "22890000000": {
+      "role": "family",
+      "enabled": true,
+      "instructions": "Tu réponds chaleureusement, simplement et naturellement."
+    },
+    "22891000000": {
+      "role": "client",
+      "enabled": true,
+      "instructions": "Tu réponds de façon professionnelle, polie et concise."
+    }
+  },
+  "defaultInstructions": "Tu es SIPOKBOT, assistant de SIPOKTECK. Tu réponds en français, de façon naturelle, respectueuse et utile. Tu ne prétends jamais être humain. Tu n'inventes pas les informations inconnues. Tu ne prétends jamais avoir effectué une action externe."
+}

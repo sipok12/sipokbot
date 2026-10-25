@@ -1,0 +1,19 @@
+services:
+  sipokbot:
+    build: .
+    image: sipokbot:latest
+    container_name: sipokbot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      # Session WhatsApp + config.json : à sauvegarder (voir scripts/backup.sh)
+      - ./data:/data
+    # Aucun port publié : le bot se connecte lui-même à WhatsApp, il n'a besoin ni de domaine ni de HTTPS.
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

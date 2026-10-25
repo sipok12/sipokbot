@@ -1,0 +1,21 @@
+{
+  "name": "sipokbot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SIPOKBOT - assistant WhatsApp avec Google Gemini",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/lib.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^1.30.0",
+    "@whiskeysockets/baileys": "^6.7.18",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
