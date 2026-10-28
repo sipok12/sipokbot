@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY index.js lib.js config.default.json ./
+COPY index.js lib.js groq.js config.default.json ./
 
 # Dossier de données persistant (session WhatsApp + config.json), propriété de l'utilisateur "node"
 RUN mkdir -p /data && chown -R node:node /data /app
