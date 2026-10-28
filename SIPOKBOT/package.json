@@ -3,16 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "SIPOKBOT - assistant WhatsApp avec Google Gemini",
+  "description": "SIPOKBOT - assistant WhatsApp avec Groq",
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/lib.test.js"
+    "test": "node --test test/lib.test.js test/groq.test.js",
+    "test:groq": "node scripts/test-groq.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "@google/genai": "^1.30.0",
     "@whiskeysockets/baileys": "^6.7.18",
     "dotenv": "^16.4.7",
     "pino": "^9.6.0",

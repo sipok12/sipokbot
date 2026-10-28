@@ -4,7 +4,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion
 } from '@whiskeysockets/baileys';
-import { GoogleGenAI } from '@google/genai';
+import { generateGroq } from './groq.js';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import fs from 'node:fs';
@@ -16,7 +16,6 @@ import {
   RateLimiter,
   TtlSet,
   extractText,
-  isRetryableError,
   loadConfig,
   maskId,
   resolveSenderPhone,
@@ -29,21 +28,21 @@ import {
 const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const AUTH_DIR = path.join(DATA_DIR, 'auth_info');
-const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const API_KEY = process.env.GROQ_API_KEY;
+const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const BOT_NAME = process.env.BOT_NAME || 'SIPOKBOT';
 const OWNER = (process.env.OWNER_NUMBER || '').replace(/\D/g, '');
 const PAIRING_NUMBER = (process.env.PAIRING_NUMBER || '').replace(/\D/g, '');
 const PORT = Number(process.env.PORT || 3000);
 const MAX_MESSAGE_AGE_S = Number(process.env.MAX_MESSAGE_AGE_S || 120);
 const DISCONNECT_RESTART_MIN = Number(process.env.DISCONNECT_RESTART_MIN || 10);
-const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 30000);
+const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 30000);
 
 const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 const logErr = (...a) => console.error(`[${new Date().toISOString()}]`, ...a);
 
 if (!API_KEY || /COLLEZ|VOTRE_CLE|YOUR_/i.test(API_KEY)) {
-  logErr('GEMINI_API_KEY manquante ou non renseignée dans .env.');
+  logErr('GROQ_API_KEY manquante ou non renseignée dans .env.');
   process.exit(1);
 }
 if (!OWNER) {
@@ -58,7 +57,6 @@ if (!fs.existsSync(CONFIG_PATH)) {
 }
 
 // ---------- État ----------
-const ai = new GoogleGenAI({ apiKey: API_KEY });
 const histories = new Map();
 const seenIds = new TtlSet(10 * 60 * 1000);
 const perContact = new RateLimiter(Number(process.env.MAX_MSG_PER_MINUTE || 8), 60 * 1000);
@@ -82,54 +80,19 @@ function isSelfChat(jid) {
   return mine.includes(userPart(jid));
 }
 
-function withTimeout(promise, ms) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timeout après ${ms} ms`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-// ---------- Gemini ----------
-async function generate(contents, instructions) {
-  const config = { systemInstruction: instructions, maxOutputTokens: 1024, temperature: 0.7 };
-  // gemini-2.5-flash « réfléchit » par défaut et ces jetons comptent dans maxOutputTokens :
-  // la réponse pouvait revenir vide ou tronquée. On désactive la réflexion pour un bot de chat.
-  const budget = process.env.GEMINI_THINKING_BUDGET;
-  if (budget !== undefined && budget !== '') {
-    config.thinkingConfig = { thinkingBudget: Number(budget) };
-  } else if (/2\.5-flash/.test(MODEL)) {
-    config.thinkingConfig = { thinkingBudget: 0 };
-  }
-
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await withTimeout(
-        ai.models.generateContent({ model: MODEL, contents, config }),
-        GEMINI_TIMEOUT_MS
-      );
-    } catch (error) {
-      if (attempt >= 2 || !isRetryableError(error)) throw error;
-      await sleep(1500 * 2 ** attempt);
-    }
-  }
-}
-
-async function askGemini(conversationKey, userText, instructions) {
+// ---------- Groq ----------
+async function askGroq(conversationKey, userText, instructions) {
   const recentHistory = (histories.get(conversationKey) || []).slice(-8);
-  const userTurn = { role: 'user', parts: [{ text: userText }] };
-  const response = await generate([...recentHistory, userTurn], instructions);
-
-  const answer = response.text?.trim();
-  if (!answer) {
-    const reason = response.candidates?.[0]?.finishReason || response.promptFeedback?.blockReason || 'inconnue';
-    throw new Error(`Gemini a renvoyé une réponse vide (raison : ${reason}).`);
-  }
+  const userTurn = { role: 'user', content: userText };
+  const answer = await generateGroq(
+    [{ role: 'system', content: instructions }, ...recentHistory, userTurn],
+    { apiKey: API_KEY, model: MODEL, timeoutMs: GROQ_TIMEOUT_MS }
+  );
 
   histories.set(conversationKey, [
     ...recentHistory,
     userTurn,
-    { role: 'model', parts: [{ text: answer }] }
+    { role: 'assistant', content: answer }
   ].slice(-10));
   trimOldEntries(histories, 300);
   return answer;
@@ -141,10 +104,15 @@ async function reply(jid, text, quoted) {
 }
 
 async function handleOwnerCommand(text, jid, config) {
-  if (/^!bot\s+(on|off)$/i.test(text)) {
-    config.enabled = /on$/i.test(text);
+  const modeCommand = text.match(/^!bot\s+(on|off|online|offline)$/i);
+  if (modeCommand) {
+    config.enabled = /^(on|online)$/i.test(modeCommand[1]);
     saveJsonAtomic(CONFIG_PATH, config);
-    await reply(jid, `${BOT_NAME} : ${config.enabled ? 'activé' : 'désactivé'}.`);
+    await reply(
+      jid,
+      `${BOT_NAME} : mode ${config.enabled ? 'online' : 'offline'} ` +
+        `(${config.enabled ? 'réponses automatiques activées' : 'réponses automatiques en pause'}).`
+    );
     return true;
   }
   if (/^!group\s+(on|off)$/i.test(text)) {
@@ -242,11 +210,11 @@ async function handleMessage(msg) {
   const conversationKey = isGroup ? `${jid}:${senderJid}` : jid;
   try {
     await socket.sendPresenceUpdate('composing', jid).catch(() => {});
-    const answer = await askGemini(conversationKey, userText, instructions);
+    const answer = await askGroq(conversationKey, userText, instructions);
     await reply(jid, answer, msg);
     log(`Réponse envoyée à ${maskId(jid)}`);
   } catch (error) {
-    logErr('Erreur Gemini/WhatsApp :', error?.message || error);
+    logErr('Erreur Groq/WhatsApp :', error?.message || error);
     await reply(jid, 'Désolé, je rencontre un problème technique. Réessaie plus tard.').catch(() => {});
   } finally {
     await socket.sendPresenceUpdate('paused', jid).catch(() => {});
